@@ -1,0 +1,93 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ftp-web-final-
+  namespace: dev
+spec:
+  entrypoint: main
+  serviceAccountName: argo
+  templates:
+  - name: main
+    steps:
+    - - name: clone
+        template: git-clone
+    - - name: build
+        template: kaniko-build
+        arguments:
+          artifacts:
+          - name: source
+            from: "{{steps.clone.outputs.artifacts.source}}"
+    - - name: deploy
+        template: update-deployment
+
+  - name: git-clone
+    container:
+      image: alpine/git:v2.36.3
+      command: [sh, -c]
+      args:
+      - |
+        mkdir -p /root/.ssh
+        echo "Host github.com
+          HostName github.com
+          User git
+          StrictHostKeyChecking no
+          IdentityFile /root/.ssh/id_ed25519
+          ProxyCommand nc -X 5 -x 10.43.0.1:1080 %h %p" > /root/.ssh/config
+        chmod 600 /root/.ssh/config
+        cp /ssh/id_ed25519 /root/.ssh/
+        chmod 600 /root/.ssh/id_ed25519
+        git clone git@github.com:fyl080801/ftp-web-preview.git /workspace
+        cd /workspace && echo "Commit: $(git rev-parse --short HEAD)"
+      volumeMounts:
+      - name: ssh-key
+        mountPath: /ssh
+        readOnly: true
+    volumes:
+    - name: ssh-key
+      secret:
+        secretName: github-deploy-key
+    outputs:
+      artifacts:
+      - name: source
+        path: /workspace
+
+  - name: kaniko-build
+    container:
+      image: gcr.io/kaniko-project/executor:v1.11.0
+      args:
+      - --dockerfile=/workspace/Dockerfile
+      - --context=/workspace
+      - --destination=192.168.68.95:31443/ai-apps/ftp-web-preview:latest
+      - --skip-tls-verify
+      - --build-arg=HTTP_PROXY=http://10.43.0.1:1080
+      - --build-arg=HTTPS_PROXY=http://10.43.0.1:1080
+      env:
+      - name: HTTP_PROXY
+        value: http://10.43.0.1:1080
+      - name: HTTPS_PROXY
+        value: http://10.43.0.1:1080
+      volumeMounts:
+      - name: source
+        mountPath: /workspace
+      - name: docker-config
+        mountPath: /kaniko/.docker
+    inputs:
+      artifacts:
+      - name: source
+        path: /workspace
+    volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-auth
+
+  - name: update-deployment
+    container:
+      image: bitnami/kubectl:1.25
+      command: [sh, -c]
+      args:
+      - |
+        kubectl set image deployment/ftp-web-preview \
+          app=192.168.68.95:31443/ai-apps/ftp-web-preview:latest \
+          -n dev --record
+        kubectl rollout status deployment/ftp-web-preview -n dev --timeout=300s
+        echo "Deployment updated successfully!"

@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ftp-web-preview
+  namespace: dev
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        env:
+        - name: FTP_HOST
+          value: "192.168.68.246"
+        - name: FTP_PORT
+          value: "990"
+        - name: FTP_USER
+          value: "bblp"
+        - name: FTP_PASS
+          value: "c97b754b"
