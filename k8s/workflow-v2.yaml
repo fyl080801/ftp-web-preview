@@ -1,0 +1,93 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ftp-web-preview-build-
+  namespace: dev
+spec:
+  entrypoint: main
+  serviceAccountName: argo
+  templates:
+  - name: main
+    steps:
+    - - name: clone
+        template: git-clone
+    - - name: build
+        template: kaniko-build
+        arguments:
+          artifacts:
+          - name: source
+            from: "{{steps.clone.outputs.artifacts.source}}"
+
+  - name: git-clone
+    container:
+      image: 192.168.68.95:31443/docker.io/alpine/git:latest
+      command: [sh, -c]
+      args:
+      - |
+        mkdir -p /root/.ssh
+        cp /ssh-key/id_ed25519 /root/.ssh/
+        chmod 600 /root/.ssh/id_ed25519
+        cp /ssh-key/known_hosts /root/.ssh/known_hosts 2>/dev/null || true
+        
+        # 配置代理
+        cat > /root/.ssh/config << 'EOF'
+        Host github.com
+          HostName github.com
+          User git
+          IdentityFile /root/.ssh/id_ed25519
+          StrictHostKeyChecking accept-new
+          ProxyCommand nc -X 5 -x 10.43.0.1:1080 %h %p
+        EOF
+        chmod 600 /root/.ssh/config
+        
+        git clone git@github.com:fyl080801/ftp-web-preview.git /workspace
+        cd /workspace
+        echo "Cloned successfully"
+        ls -la
+      volumeMounts:
+      - name: ssh-key
+        mountPath: /ssh-key
+        readOnly: true
+    volumes:
+    - name: ssh-key
+      secret:
+        secretName: github-deploy-key
+    outputs:
+      artifacts:
+      - name: source
+        path: /workspace
+    nodeSelector:
+      kubernetes.io/arch: amd64
+
+  - name: kaniko-build
+    container:
+      image: 192.168.68.95:31443/gcr.io/kaniko-project/executor:latest
+      args:
+      - --dockerfile=/workspace/Dockerfile
+      - --context=/workspace
+      - --destination=192.168.68.95:31443/ai-apps/ftp-web-preview:latest
+      - --skip-tls-verify
+      # 构建参数 - 代理配置
+      - --build-arg=HTTP_PROXY=http://10.43.0.1:1080
+      - --build-arg=HTTPS_PROXY=http://10.43.0.1:1080
+      - --build-arg=NO_PROXY=192.168.68.95,localhost,127.0.0.1,.svc,.cluster.local
+      env:
+      - name: HTTP_PROXY
+        value: http://10.43.0.1:1080
+      - name: HTTPS_PROXY
+        value: http://10.43.0.1:1080
+      - name: NO_PROXY
+        value: 192.168.68.95,localhost,127.0.0.1,.svc,.cluster.local
+      volumeMounts:
+      - name: docker-config
+        mountPath: /kaniko/.docker
+    inputs:
+      artifacts:
+      - name: source
+        path: /workspace
+    volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-auth
+    nodeSelector:
+      kubernetes.io/arch: amd64

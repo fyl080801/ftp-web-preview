@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ftp-local-build-
+  namespace: dev
+spec:
+  entrypoint: main
+  serviceAccountName: argo
+  templates:
+  - name: main
+    steps:
+    - - name: build
+        template: kaniko-build
+
+  - name: kaniko-build
+    container:
+      image: gcr.io/kaniko-project/executor:latest
+      args:
+      - --dockerfile=/workspace/Dockerfile
+      - --context=/workspace
+      - --destination=192.168.68.95:31443/ai-apps/ftp-web-preview:local-fixed
+      - --skip-tls-verify
+      volumeMounts:
+      - name: source-code
+        mountPath: /workspace
+      - name: docker-config
+        mountPath: /kaniko/.docker
+    volumes:
+    - name: source-code
+      hostPath:
+        path: /home/node/.openclaw/workspace/ftp-web-preview
+    - name: docker-config
+      secret:
+        secretName: harbor-auth
+    nodeSelector:
+      kubernetes.io/arch: amd64

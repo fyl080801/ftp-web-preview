@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ftp-web-preview-build
+  namespace: dev
+  generateName: ftp-web-preview-build-
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    steps:
+    - - name: build
+        template: build-image
+    - - name: deploy
+        template: deploy-app
+        arguments:
+          parameters:
+          - name: image
+            value: "{{steps.build.outputs.parameters.image}}"
+
+  - name: build-image
+    container:
+      image: gcr.io/kaniko-project/executor:latest
+      args:
+      - --dockerfile=/workspace/Dockerfile
+      - --context=/workspace
+      - --destination=docker.io/fyl080801/ftp-web-preview:latest
+      - --cache=true
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: docker-config
+        mountPath: /kaniko/.docker
+    volumes:
+    - name: workspace
+      hostPath:
+        path: /home/node/.openclaw/workspace/ftp-web-preview
+    - name: docker-config
+      secret:
+        secretName: docker-registry-secret
+    outputs:
+      parameters:
+      - name: image
+        value: "docker.io/fyl080801/ftp-web-preview:latest"
+
+  - name: deploy-app
+    inputs:
+      parameters:
+      - name: image
+    resource:
+      action: apply
+      manifest: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ftp-web-preview
+          namespace: dev
+        spec:
+          template:
+            spec:
+              containers:
+              - name: app
+                image: "{{inputs.parameters.image}}"
+
+  serviceAccountName: argo-workflow-sa

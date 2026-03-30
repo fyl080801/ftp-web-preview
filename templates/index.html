@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Print FTP 文件管理</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖨️ 3D Print FTP 文件管理</h1>
+            <div class="server-info">
+                <span>服务器: {{ ftp_host }}:{{ ftp_port }}</span>
+            </div>
+        </header>
+        
+        <nav class="breadcrumb">
+            <button id="btn-home">🏠 根目录</button>
+            <span id="current-path">/</span>
+        </nav>
+        
+        <div class="loading" id="loading">加载中...</div>
+        
+        <div class="file-list" id="file-list">
+            <!-- 文件列表将在这里动态生成 -->
+        </div>
+        
+        <footer>
+            <p>FTP Web Preview | <span id="file-count">0</span> 个项目</p>
+        </footer>
+    </div>
+    
+    <script>
+        let currentPath = '/';
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFiles('/');
+            
+            document.getElementById('btn-home').addEventListener('click', function() {
+                loadFiles('/');
+            });
+        });
+        
+        function loadFiles(path) {
+            currentPath = path;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('current-path').textContent = path || '/';
+            
+            fetch(`/api/list?path=${encodeURIComponent(path)}`)
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('loading').style.display = 'none';
+                    
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+                    
+                    renderFiles(data.files || []);
+                    document.getElementById('file-count').textContent = (data.files || []).length;
+                })
+                .catch(err => {
+                    document.getElementById('loading').style.display = 'none';
+                    showError('加载失败: ' + err.message);
+                });
+        }
+        
+        function renderFiles(files) {
+            const container = document.getElementById('file-list');
+            container.innerHTML = '';
+            
+            if (files.length === 0) {
+                container.innerHTML = '<div class="empty">目录为空</div>';
+                return;
+            }
+            
+            // 排序: 文件夹在前，然后按名称排序
+            files.sort((a, b) => {
+                if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+            
+            // 如果有上级目录
+            if (currentPath !== '/') {
+                const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+                const parentItem = document.createElement('div');
+                parentItem.className = 'file-item directory';
+                parentItem.innerHTML = `
+                    <span class="icon">📁</span>
+                    <span class="name">..</span>
+                    <span class="size">上级目录</span>
+                `;
+                parentItem.addEventListener('click', () => loadFiles(parentPath));
+                container.appendChild(parentItem);
+            }
+            
+            files.forEach(file => {
+                const item = document.createElement('div');
+                item.className = `file-item ${file.is_dir ? 'directory' : ''} ${file.is_3mf ? 'three-mf' : ''}`;
+                
+                let icon = '📄';
+                if (file.is_dir) icon = '📁';
+                else if (file.is_3mf) icon = '🧊';
+                
+                item.innerHTML = `
+                    <span class="icon">${icon}</span>
+                    <span class="name" title="${file.name}">${file.name}</span>
+                    <span class="size">${file.is_dir ? '目录' : file.size_formatted}</span>
+                    <span class="modified">${file.modified}</span>
+                    ${!file.is_dir ? `<button class="btn-download" data-path="${currentPath === '/' ? '' : currentPath}/${file.name}">下载</button>` : ''}
+                `;
+                
+                if (file.is_dir) {
+                    item.addEventListener('click', () => {
+                        const newPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+                        loadFiles(newPath);
+                    });
+                }
+                
+                container.appendChild(item);
+            });
+            
+            // 绑定下载按钮
+            document.querySelectorAll('.btn-download').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const path = this.dataset.path;
+                    window.location.href = `/api/download?path=${encodeURIComponent(path)}`;
+                });
+            });
+        }
+        
+        function showError(msg) {
+            document.getElementById('file-list').innerHTML = `
+                <div class="error">❌ ${msg}</div>
+            `;
+        }
+    </script>
+</body>
+</html>

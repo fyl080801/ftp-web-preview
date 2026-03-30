@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-proxy-config
+  namespace: dev
+data:
+  # SSH config 用于 git 操作通过代理
+  ssh_config: |
+    Host github.com
+      HostName github.com
+      User git
+      IdentityFile /root/.ssh/id_ed25519
+      StrictHostKeyChecking yes
+      UserKnownHostsFile /root/.ssh/known_hosts
+      # 通过 SOCKS5 代理连接 GitHub
+      ProxyCommand nc -X 5 -x dev/workflow-proxy-config:1080 %h %p
