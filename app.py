@@ -19,16 +19,23 @@ FTP_PASS = os.environ.get('FTP_PASS', 'c97b754b')
 def ftps_list(path='/'):
     """使用 curl 获取 FTPS 隐式 TLS 文件列表 (端口 990)"""
     try:
-        # 隐式 FTPS 使用 ftps:// 协议，端口 990
+        # 确保路径以 / 开头
+        if not path.startswith('/'):
+            path = '/' + path
+        
+        # 构建完整 URL
+        url = f'ftps://{FTP_USER}:{FTP_PASS}@{FTP_HOST}:{FTP_PORT}{path}'
+        
         cmd = [
             'curl', '--ssl-reqd', '-k', '-s',
-            f'ftps://{FTP_USER}:{FTP_PASS}@{FTP_HOST}:{FTP_PORT}{path}',
+            url,
             '--max-time', '30'
         ]
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
         
         if result.returncode != 0:
-            return {'error': f'FTP error: {result.stderr}'}
+            return {'error': f'FTP error: {result.stderr}', 'url': url}
         
         files = []
         for line in result.stdout.strip().split('\n'):
@@ -42,8 +49,6 @@ def ftps_list(path='/'):
                 # 解析日期
                 try:
                     year = datetime.now().year
-                    # 如果是时间格式 (07:04)，年份就是今年
-                    # 如果是年份格式 (2023)，就用那个年份
                     if ':' in time_or_year:
                         date_str = f"{year}-{month}-{day}"
                     else:
@@ -83,9 +88,15 @@ def ftps_download(remote_path):
         fd, local_path = tempfile.mkstemp(suffix=os.path.basename(remote_path))
         os.close(fd)
         
+        # 确保路径以 / 开头
+        if not remote_path.startswith('/'):
+            remote_path = '/' + remote_path
+        
+        url = f'ftps://{FTP_USER}:{FTP_PASS}@{FTP_HOST}:{FTP_PORT}{remote_path}'
+        
         cmd = [
             'curl', '--ssl-reqd', '-k', '-o', local_path,
-            f'ftps://{FTP_USER}:{FTP_PASS}@{FTP_HOST}:{FTP_PORT}{remote_path}',
+            url,
             '--max-time', '300'
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=310)
