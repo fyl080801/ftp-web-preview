@@ -18,12 +18,46 @@
         <nav class="breadcrumb">
             <button id="btn-home">🏠 根目录</button>
             <span id="current-path">/</span>
+            <div class="breadcrumb-actions">
+                <button id="btn-upload" class="btn-primary">📤 上传文件</button>
+            </div>
         </nav>
         
         <div class="loading" id="loading">加载中...</div>
         
         <div class="file-list" id="file-list">
             <!-- 文件列表将在这里动态生成 -->
+        </div>
+        
+        <!-- 上传对话框 -->
+        <div class="upload-modal" id="upload-modal" style="display: none;">
+            <div class="upload-dialog">
+                <h3>📤 上传文件到当前目录</h3>
+                <p class="upload-path" id="upload-target-path">/</p>
+                <p class="upload-info">允许的文件类型: .3mf, .gcode, .bgcode, .txt, .stl</p>
+                <p class="upload-info">最大文件大小: 500MB</p>
+                
+                <div class="upload-dropzone" id="upload-dropzone">
+                    <input type="file" id="file-input" accept=".3mf,.gcode,.bgcode,.txt,.stl" style="display: none;">
+                    <div class="upload-placeholder">
+                        <div class="upload-icon">📁</div>
+                        <p>点击选择文件或拖拽文件到此处</p>
+                    </div>
+                </div>
+                
+                <div class="upload-progress" id="upload-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <p class="progress-text" id="progress-text">0%</p>
+                </div>
+                
+                <div class="upload-result" id="upload-result" style="display: none;"></div>
+                
+                <div class="upload-actions">
+                    <button id="btn-cancel-upload" class="btn-secondary">取消</button>
+                </div>
+            </div>
         </div>
         
         <footer>
@@ -33,6 +67,7 @@
     
     <script>
         let currentPath = '/';
+        let isLoading = false;
         
         document.addEventListener('DOMContentLoaded', function() {
             loadFiles('/');
@@ -40,9 +75,144 @@
             document.getElementById('btn-home').addEventListener('click', function() {
                 loadFiles('/');
             });
+            
+            // 上传功能
+            const uploadModal = document.getElementById('upload-modal');
+            const uploadBtn = document.getElementById('btn-upload');
+            const cancelBtn = document.getElementById('btn-cancel-upload');
+            const dropzone = document.getElementById('upload-dropzone');
+            const fileInput = document.getElementById('file-input');
+            
+            uploadBtn.addEventListener('click', function() {
+                document.getElementById('upload-target-path').textContent = '目标目录: ' + currentPath;
+                uploadModal.style.display = 'flex';
+                resetUploadUI();
+            });
+            
+            cancelBtn.addEventListener('click', function() {
+                uploadModal.style.display = 'none';
+            });
+            
+            dropzone.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            dropzone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                dropzone.classList.add('dragover');
+            });
+            
+            dropzone.addEventListener('dragleave', function() {
+                dropzone.classList.remove('dragover');
+            });
+            
+            dropzone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                dropzone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFileUpload(files[0]);
+                }
+            });
+            
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    handleFileUpload(this.files[0]);
+                }
+            });
+            
+            // 点击模态框背景关闭
+            uploadModal.addEventListener('click', function(e) {
+                if (e.target === uploadModal) {
+                    uploadModal.style.display = 'none';
+                }
+            });
         });
         
+        function resetUploadUI() {
+            document.getElementById('upload-progress').style.display = 'none';
+            document.getElementById('upload-result').style.display = 'none';
+            document.getElementById('upload-dropzone').style.display = 'block';
+            document.getElementById('file-input').value = '';
+        }
+        
+        function handleFileUpload(file) {
+            const allowedTypes = ['.3mf', '.gcode', '.bgcode', '.txt', '.stl'];
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            
+            if (!allowedTypes.includes(ext)) {
+                showUploadResult('❌ 不支持的文件类型。允许: ' + allowedTypes.join(', '), 'error');
+                return;
+            }
+            
+            const maxSize = 500 * 1024 * 1024; // 500MB
+            if (file.size > maxSize) {
+                showUploadResult('❌ 文件超过 500MB 限制', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('path', currentPath);
+            
+            // 隐藏 dropzone，显示进度
+            document.getElementById('upload-dropzone').style.display = 'none';
+            document.getElementById('upload-progress').style.display = 'block';
+            
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    document.getElementById('progress-fill').style.width = percent + '%';
+                    document.getElementById('progress-text').textContent = percent + '% - ' + file.name;
+                }
+            });
+            
+            xhr.addEventListener('load', function() {
+                document.getElementById('upload-progress').style.display = 'none';
+                
+                if (xhr.status === 200) {
+                    const response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        showUploadResult('✅ 上传成功: ' + file.name, 'success');
+                        // 刷新文件列表
+                        setTimeout(() => {
+                            loadFiles(currentPath);
+                        }, 1000);
+                    } else {
+                        showUploadResult('❌ 上传失败: ' + (response.error || '未知错误'), 'error');
+                    }
+                } else {
+                    let errorMsg = '上传失败';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMsg = response.error || errorMsg;
+                    } catch(e) {}
+                    showUploadResult('❌ ' + errorMsg, 'error');
+                }
+            });
+            
+            xhr.addEventListener('error', function() {
+                document.getElementById('upload-progress').style.display = 'none';
+                showUploadResult('❌ 网络错误，上传失败', 'error');
+            });
+            
+            xhr.open('POST', '/api/upload');
+            xhr.send(formData);
+        }
+        
+        function showUploadResult(message, type) {
+            const resultDiv = document.getElementById('upload-result');
+            resultDiv.textContent = message;
+            resultDiv.className = 'upload-result ' + type;
+            resultDiv.style.display = 'block';
+        }
+        
         function loadFiles(path) {
+            if (isLoading) return;
+            isLoading = true;
+            
             currentPath = path;
             document.getElementById('loading').style.display = 'block';
             document.getElementById('current-path').textContent = path || '/';
@@ -50,6 +220,7 @@
             fetch(`/api/list?path=${encodeURIComponent(path)}`)
                 .then(res => res.json())
                 .then(data => {
+                    isLoading = false;
                     document.getElementById('loading').style.display = 'none';
                     
                     if (data.error) {
@@ -61,6 +232,7 @@
                     document.getElementById('file-count').textContent = (data.files || []).length;
                 })
                 .catch(err => {
+                    isLoading = false;
                     document.getElementById('loading').style.display = 'none';
                     showError('加载失败: ' + err.message);
                 });
@@ -102,6 +274,8 @@
                 let icon = '📄';
                 if (file.is_dir) icon = '📁';
                 else if (file.is_3mf) icon = '🧊';
+                else if (file.name.toLowerCase().endsWith('.gcode') || file.name.toLowerCase().endsWith('.bgcode')) icon = '📐';
+                else if (file.name.toLowerCase().endsWith('.stl')) icon = '📐';
                 
                 item.innerHTML = `
                     <span class="icon">${icon}</span>
